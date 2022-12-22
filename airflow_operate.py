@@ -12,10 +12,7 @@ import numpy as np
 from datetime import datetime
 import os
 from google.cloud import bigquery
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import when
-import pyspark.sql.functions as F
-from pyspark.sql.functions import col
+
 
 def retrive_data():
     t_start = datetime.now()
@@ -154,84 +151,8 @@ def merge_data(time_file):
     df_concat.to_csv('gs://off_dataeng_bucket/traffy_data_to_bq/traffy_data_to_bq.csv',index=False)
     df_concat.to_csv('gs://off_dataeng_bucket/traffy_data_to_bq_backup/traffy_data_to_bq_{}.csv'.format(time_file),index=False)
 
-# 'with' enables DAG to become context managers; automatically assign new operators to that DAG
 
-def data_processing_spark():
-    client = bigquery.Client()
-    def getData():
-        query_job = client.query(
-            """
-            SELECT *
-            FROM `my-gcp-369016.traffy_fondue_project.traffy_data`
-            WHERE state IS NOT NULL AND type IS NOT NULL AND state != 'เสร็จสิ้น'
-            # LIMIT 20
-            """
-            )
-        return query_job.to_dataframe()
-    df = getData()
-    spark = SparkSession.builder\
-            .master("local[*]")\
-            .appName("Test Setup")\
-            .getOrCreate()
-    df_spark = spark.createDataFrame(df) 
-    df_spark_with_column = df_spark.withColumn('type', when(df_spark.type.contains('สัตว์จรจัด'),'สัตว์จรจัด') \
-      .when(df_spark.type.contains('คนจรจัด'),'คนจรจัด') \
-      .when(df_spark.type.contains('ป้าย'),'ป้าย') \
-      .when(df_spark.type.contains('แสงสว่าง'),'แสงสว่าง') \
-      .when(df_spark.type.contains('ทางเท้า'),'ทางเท้า') \
-      .when(df_spark.type.contains('ท่อระบายน้ำ'),'ท่อระบายน้ำ') \
-      .when(df_spark.type.contains('น้ำท่วม'),'น้ำท่วม') \
-      .when(df_spark.type.contains('สายไฟ'),'สายไฟ') \
-      .when(df_spark.type.contains('สะพาน'),'สะพาน') \
-      .when(df_spark.type.contains('ห้องน้ำ'),'ห้องน้ำ') \
-      .when(df_spark.type.contains('จราจร'),'จราจร') \
-      .when(df_spark.type.contains('ถนน'), 'ถนน') \
-      .when(df_spark.type.contains('คลอง'),'คลอง') \
-      .when(df_spark.type.contains('ต้นไม้'),'ต้นไม้') \
-      .when(df_spark.type.contains('กีดขวาง'),'กีดขวาง') \
-      .when(df_spark.type.contains('ความสะอาด'),'ความสะอาด') \
-      .when(df_spark.type.contains('ความปลอดภัย'),'ความปลอดภัย') \
-      .when(df_spark.type.contains('เสียงรบกวน'),'เสียงรบกวน') \
-      .when(df_spark.type.contains('ร้องเรียน'),'ร้องเรียน') \
-      .when(df_spark.type.contains('การเดินทาง'),'การเดินทาง') \
-      .when(df_spark.type.contains('ป้ายจราจร'),'ป้ายจราจร') \
-      .when(df_spark.type.contains('เสนอแนะ'),'เสนอแนะ') \
-      .when(df_spark.type.contains('สอบถาม'),'สอบถาม') \
-      .otherwise(df_spark.type))
 
-    df_spark_with_column = df_spark_with_column.withColumn('lat2',F.round((F.col('lat')),2))
-    df_spark_with_column = df_spark_with_column.withColumn('lat3',F.round((F.col('lat')),3))
-    df_spark_with_column = df_spark_with_column.withColumn('long2',F.round((F.col('long')),2))
-    df_spark_with_column = df_spark_with_column.withColumn('long3',F.round((F.col('long')),3))
-    df_spark_with_column2 = df_spark_with_column.groupBy('type', 'lat2', 'long2').count().withColumn("group_id", F.monotonically_increasing_id() + 123)
-    df_spark_with_column3 = df_spark_with_column.groupBy('type', 'lat3', 'long3').count().withColumn('group_id3', F.monotonically_increasing_id() +123)
-    
-    condition = [df_spark_with_column.lat2 == df_spark_with_column2.lat2, 
-             df_spark_with_column.long2 == df_spark_with_column2.long2, 
-             df_spark_with_column.type == df_spark_with_column2.type]
-
-    df_spark_with_column = df_spark_with_column.alias('df_spark_with_column') \
-                            .join(df_spark_with_column2.alias('df_spark_with_column2'), condition, 'left') \
-                            .select([col('df_spark_with_column.'+xx) for xx in df_spark_with_column.columns] \
-                                    + [col('df_spark_with_column2.count'),col('df_spark_with_column2.group_id')])
-
-    condition3 = [df_spark_with_column.lat3 == df_spark_with_column3.lat3, 
-             df_spark_with_column.long3 == df_spark_with_column3.long3, 
-             df_spark_with_column.type == df_spark_with_column3.type]
-
-    df_spark_with_column = df_spark_with_column.alias('df_spark_with_column') \
-                .join(df_spark_with_column3.alias('df_spark_with_column3'), condition3, 'left') \
-                .select([col('df_spark_with_column.'+xx) for xx in df_spark_with_column.columns] \
-                        + [col('df_spark_with_column3.count'),col('df_spark_with_column3.group_id3')])
-
-    df_spark_with_column = df_spark_with_column.drop('long2')
-    df_spark_with_column = df_spark_with_column.drop('lat2')
-    df_spark_with_column = df_spark_with_column.drop('long3')
-    df_spark_with_column = df_spark_with_column.drop('lat3')
-    newNames = ['message_id','type', 'type_id', 'org','comment','ticket_id','photo','after_photo','address','district','subdistrict','province','timestamp','state','lat','long','data_updated','count2','group_id','count3','group_id3']
-    df_spark_with_column= df_spark_with_column.toDF(*newNames)
-    pandasDF = df_spark_with_column.toPandas()
-    pandasDF.to_csv('gs://off_dataeng_bucket/result_analytics/result_analytics.csv',index=False)
 
 
 # 'with' enables DAG to become context managers; automatically assign new operators to that DAG
@@ -242,7 +163,7 @@ default_args = {
     'schedule_interval': '0 */2 * * *',
 }
 
-dag = DAG('get_data_to_bq2', catchup=False, default_args=default_args,schedule_interval='0 */2 * * *')
+dag = DAG('get_data_to_bq', catchup=False, default_args=default_args,schedule_interval='0 */2 * * *')
 
 
 start = DummyOperator(task_id='start_task',dag=dag)
@@ -256,11 +177,10 @@ merge_data = PythonOperator(task_id='merge_data', python_callable=merge_data,op_
 mv_file_to_bucket = BashOperator(task_id='mv_file_to_bucket', bash_command='gsutil mv ~/airflow/data_tmp/data_from_api.csv gs://off_dataeng_bucket' )
 load_data_to_bq = BashOperator(task_id='load_data_to_bq', bash_command='bq load --source_format=CSV --allow_quoted_newlines  \
         --autodetect --replace my-gcp-369016:traffy_fondue_project.traffy_data gs://off_dataeng_bucket/traffy_data_to_bq/traffy_data_to_bq.csv',dag=dag) 
-load_data_to_bq2 = BashOperator(task_id='load_data_to_bq_analytics', bash_command='bq load --source_format=CSV --allow_quoted_newlines  \
-       --autodetect --replace my-gcp-369016:traffy_fondue_project.traffy_analytics2 gs://off_dataeng_bucket/result_analytics/result_analytics.csv',dag=dag) 
+
 
 rm_file_after = BashOperator(task_id='rm_file_after', bash_command='rm -f /home/apisakch11/airflow/data_tmp/*.csv',dag=dag )
 rm_file_before = BashOperator(task_id='rm_file_before', bash_command='rm -f /home/apisakch11/airflow/data_tmp/*.csv',dag=dag )
-data_processing_spark = PythonOperator(task_id='data_processing_spark', python_callable=data_processing_spark,dag=dag)
+
 # creating DAG dependencies can be a long flow or multiple short flows
-start >> rm_file_before >> operate_retrive_data >> append_data >> merge_data >> load_data_to_bq >> rm_file_after >> data_processing_spark >> load_data_to_bq2
+start >> rm_file_before >> operate_retrive_data >> append_data >> merge_data >> load_data_to_bq >> rm_file_after
